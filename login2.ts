@@ -239,7 +239,8 @@ async function main() {
         ? config.code.split(',').map(c => c.trim()).filter(Boolean)
         : [];
 
-    const browser = await chromium.launch({ headless: false, slowMo: 100 });
+    // const browser = await chromium.launch({ headless: false, slowMo: 100 });
+    const browser = await chromium.launch({ headless: true, slowMo: 100 });
 
     for (const user of credentials) {
         const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
