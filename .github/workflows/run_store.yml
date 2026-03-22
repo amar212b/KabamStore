@@ -23,7 +23,7 @@ jobs:
 
       - name: Install Playwright browsers
         # run: node node_modules/.bin/playwright install chromium --with-deps
-        run: npm exec -- playwright install chromium --with-deps
+        run: ./node_modules/.bin/playwright install chromium --with-deps
 
       - name: Write credentials and config from secrets
         run: |
