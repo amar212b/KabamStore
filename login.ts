@@ -48,7 +48,7 @@ async function main() {
             }
 
             if (config.code) {
-                const codes = config.code.split(',').map(code => code.trim());
+                const codes = config.code.split(',').map((code: string) => code.trim());
                 for (let codeIndex = 0; codeIndex < codes.length; codeIndex++) {
                     const code = codes[codeIndex];
                     try {

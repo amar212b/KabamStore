@@ -9,10 +9,21 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-
   "devDependencies": {
     "@types/node": "^22.10.5",
     "playwright": "^1.49.1",
     "typescript": "^5.7.2"
-  }
+  },
+  "dependencies": {
+    "playwright-core": "^1.49.1",
+    "undici-types": "^6.20.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amar212b/KabamStore.git"
+  },
+  "bugs": {
+    "url": "https://github.com/amar212b/KabamStore/issues"
+  },
+  "homepage": "https://github.com/amar212b/KabamStore#readme"
 }

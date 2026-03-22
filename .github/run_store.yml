@@ -1,0 +1,33 @@
+name: MCOC Store Automation
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # runs daily at 8:00 AM UTC
+  workflow_dispatch:       # also allows manual trigger from GitHub UI
+
+jobs:
+  run-store:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Write credentials and config from secrets
+        run: |
+          echo '${{ secrets.CREDENTIALS_JSON }}' > credentials.json
+          echo '${{ secrets.CONFIG_JSON }}' > config.json
+
+      - name: Run store script
+        run: node login2.ts

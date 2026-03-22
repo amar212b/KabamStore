@@ -1,4 +1,4 @@
 {
-    "url": "https://api.production.auth.pubsdk.kabam.dev/v1/oauth2/authorize?client_id=638601545997&redirect_uri=https%3A%2F%2Flogin.xsolla.com%2Fapi%2Fsocial%2Foauth2%2Fcallback&response_type=token&scope=email&state=l2_e-r_Jhyagedz9Imtcv0xwpJzH9bk7Cwg2_Z6HCwzAWYBb8ib8V0-W3bhR0QqXqqQdU5my0GR2okycjxDfCg",
+    "url": "https://api.production.auth.pubsdk.kabam.dev/v1/oauth2/authorize?client_id=638601545997&redirect_uri=https%3A%2F%2Flogin.xsolla.com%2Fapi%2Fsocial%2Foauth2%2Fcallback&response_type=token&scope=email&state=Edul-4fZWTRnwCix9jX1lGNRxaZezIzntFx50r-8u6QCnrfKUfgJgDA8vhA6BxrOKxXoCY806bluAYyQysPZNQ",
     "code":""
 }
