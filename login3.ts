@@ -4,7 +4,7 @@ const fs = require('fs');
 const MAIN_URL = 'https://store.playcontestofchampions.com/';
 
 // ─────────────────────────────────────────
-// Close modal — tries "Continue Shopping" first
+// Close modal with multiple strategies
 // ─────────────────────────────────────────
 async function closeModal(page) {
     const strategies = [
@@ -15,10 +15,11 @@ async function closeModal(page) {
         () => page.locator('[data-testid="close-icon"]').click({ timeout: 3000 }),
         () => page.keyboard.press('Escape'),
     ];
+
     for (const strategy of strategies) {
         try {
             await strategy();
-            await page.waitForTimeout(500);
+            await page.waitForTimeout(600);
             return true;
         } catch (e) {}
     }
@@ -26,117 +27,93 @@ async function closeModal(page) {
 }
 
 // ─────────────────────────────────────────
-// Check if a button is truly clickable
-// ─────────────────────────────────────────
-async function isButtonClickable(btn) {
-    try {
-        if (await btn.isDisabled()) return false;
-        const ariaDisabled = await btn.getAttribute('aria-disabled');
-        if (ariaDisabled === 'true') return false;
-        const className = await btn.getAttribute('class') || '';
-        if (/disabled|inactive|unavailable/i.test(className)) return false;
-        const text = await btn.innerText();
-        if (/owned/i.test(text)) return false;
-        if (!await btn.isVisible()) return false;
-        return true;
-    } catch (e) {
-        return false;
-    }
-}
-
-// ─────────────────────────────────────────
-// LOGIN
+// LOGIN - Most reliable version
 // ─────────────────────────────────────────
 async function loginUser(page, user) {
     console.log(`\n--- Logging in: ${user.username} ---`);
 
-    await page.goto(MAIN_URL);
-    await page.waitForLoadState('networkidle');
+    await page.goto(MAIN_URL, { waitUntil: 'networkidle' });
     await page.waitForTimeout(2000);
 
-    // Accept cookies
+    // Accept cookies if present
     try {
-        await page.locator('button.button-accept').click({ timeout: 3000 });
-        await page.waitForTimeout(1000);
+        await page.locator('button.button-accept').click({ timeout: 4000 });
+        await page.waitForTimeout(800);
     } catch (e) {}
 
-    // Debug — log page state after load
-    console.log('Page URL:', page.url());
+    // Debug information (very useful when it breaks)
+    console.log('Current URL:', page.url());
     console.log('Page title:', await page.title());
 
-    // Debug — check if login span exists in DOM
     const spanInfo = await page.evaluate(() => {
         const span = document.querySelector('span.primary-button.button-login');
         return {
             exists: !!span,
-            visible: span ? span.offsetParent !== null : false,
+            visible: span ? (span.offsetParent !== null) : false,
             parentTag: span ? span.parentElement?.tagName : null,
             parentHref: span ? span.closest('a')?.href : null,
         };
     });
     console.log('Login span info:', JSON.stringify(spanInfo));
 
-    // Take screenshot to see what GitHub Actions sees
+    // Take screenshot before attempting login
     await page.screenshot({ path: `debug_before_login_${Date.now()}.png` });
 
-    // Try to extract Kabam login URL directly from the span's parent anchor
-    const loginURL = await page.evaluate(() => {
+    // Try to get direct Kabam login URL from the anchor wrapping the span
+    let loginURL = await page.evaluate(() => {
         const span = document.querySelector('span.primary-button.button-login');
         if (!span) return null;
         let el = span;
         while (el && el.tagName !== 'A') el = el.parentElement;
-        return el ? el.href : null;
+        return el && el.href ? el.href : null;
     });
 
     if (loginURL) {
         console.log(`Navigating directly to login URL: ${loginURL}`);
-        await page.goto(loginURL);
+        await page.goto(loginURL, { waitUntil: 'domcontentloaded' });
     } else {
-        // Fallback — trigger click and wait for navigation simultaneously
-        console.log('No login URL found, trying JS click with navigation wait...');
+        console.log('No direct login URL found. Falling back to JS click + navigation...');
         await Promise.all([
-            page.waitForNavigation({ timeout: 15000 }),
+            page.waitForNavigation({ timeout: 20000 }).catch(() => {}),
             page.evaluate(() => {
                 const span = document.querySelector('span.primary-button.button-login');
                 if (span) span.click();
-            }),
+            })
         ]);
     }
 
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(1500);
 
-    // Debug — screenshot of Kabam login page
-    console.log('Kabam page URL:', page.url());
+    console.log('Kabam login page URL:', page.url());
     await page.screenshot({ path: `debug_kabam_login_${Date.now()}.png` });
 
-    // Fill email and password directly on the Kabam page
-    await page.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 10000 });
+    // Fill credentials on Kabam page
+    await page.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 15000 });
     await page.getByPlaceholder('Email').fill(user.username);
     await page.getByPlaceholder('Password').fill(user.password);
-    await page.getByRole('button', { name: /^login$/i }).click({ timeout: 5000 });
 
-    // Wait to be redirected back to the store
+    await page.getByRole('button', { name: /^login$/i }).click({ timeout: 8000 });
+
+    // Wait for redirect back to the store
     await page.waitForURL(/store\.playcontestofchampions\.com/i, { timeout: 30000 });
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
-    console.log(`Logged in: ${user.username}`);
+    console.log(`✅ Successfully logged in as ${user.username}`);
 }
 
 // ─────────────────────────────────────────
 // CLAIM FREE ITEMS
-// Always takes index 0 — DOM shrinks after each claim
 // ─────────────────────────────────────────
 async function claimFreeItems(page) {
     console.log('Checking for free items...');
     await page.waitForTimeout(1500);
 
     let attempts = 0;
-    const maxAttempts = 20; // safety cap
+    const maxAttempts = 25;
 
     while (attempts < maxAttempts) {
-        // Always re-query fresh — pick first available free button
         const buttons = await page.locator('div.item-action-free span.primary-button').all();
 
         if (buttons.length === 0) {
@@ -144,89 +121,86 @@ async function claimFreeItems(page) {
             break;
         }
 
-        // Always take index 0 since DOM shrinks after each claim
         const btn = buttons[0];
-
         const ctaText = await btn.locator('span.CTA').innerText().catch(() => '');
+
         if (/owned/i.test(ctaText)) {
             console.log(`Skipping — already owned ("${ctaText.trim()}")`);
             break;
         }
 
-        console.log(`Claiming ("${ctaText.trim()}")... [${attempts + 1}]`);
+        console.log(`Claiming item: "${ctaText.trim()}" [${attempts + 1}]`);
 
         await btn.scrollIntoViewIfNeeded();
         await page.evaluate(el => el.click(), await btn.elementHandle());
         await page.waitForTimeout(1500);
 
-        // Wait for success modal to appear
         try {
-            await page.locator('div.purchase-handler-modal').waitFor({ state: 'visible', timeout: 5000 });
+            await page.locator('div.purchase-handler-modal').waitFor({ state: 'visible', timeout: 6000 });
         } catch (e) {}
 
-        // Close the modal
         await closeModal(page);
 
-        // Wait for modal to fully disappear before next iteration
         try {
             await page.locator('div.purchase-handler-modal').waitFor({ state: 'hidden', timeout: 5000 });
         } catch (e) {}
 
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(1000);
         attempts++;
     }
 
-    console.log(`Free items done — processed ${attempts} item(s).`);
+    console.log(`Free items processing completed — claimed ${attempts} item(s).`);
 }
 
 // ─────────────────────────────────────────
 // APPLY PROMO CODES
 // ─────────────────────────────────────────
 async function applyPromoCodes(page, codes) {
+    if (codes.length === 0) return;
+
     console.log(`Applying ${codes.length} promo code(s)...`);
 
     for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
-        console.log(`Applying: ${code}`);
+        console.log(`→ Applying code: ${code}`);
+
         try {
             const codeInput = page.locator('input[placeholder="Enter your code"]');
-            await codeInput.waitFor({ state: 'visible', timeout: 5000 });
+            await codeInput.waitFor({ state: 'visible', timeout: 8000 });
             await codeInput.fill(code);
-            await page.getByText('Apply code').click();
-            await page.waitForTimeout(1500);
 
-            let errorMessage = null;
-            try {
-                errorMessage = await page
-                    .locator('span.promocodes-input__error.xds-text-minor[data-source="server"]')
-                    .textContent({ timeout: 2000 });
-            } catch (e) {}
+            await page.getByText('Apply code').click();
+            await page.waitForTimeout(1800);
+
+            // Check for error message
+            const errorMessage = await page
+                .locator('span.promocodes-input__error.xds-text-minor[data-source="server"]')
+                .textContent({ timeout: 2500 })
+                .catch(() => null);
 
             if (errorMessage) {
-                console.log(`Code ${code} rejected: ${errorMessage}`);
+                console.log(`Code ${code} rejected: ${errorMessage.trim()}`);
                 await codeInput.fill('');
                 continue;
             }
 
             const closed = await closeModal(page);
             if (!closed) {
-                console.log(`Could not close modal for ${code}, reloading...`);
-                await page.reload();
-                await page.waitForLoadState('networkidle');
-                await page.waitForTimeout(1500);
-                if (i === codes.length - 1) break;
-                i--;
+                console.log(`Failed to close modal after ${code} — reloading page`);
+                await page.reload({ waitUntil: 'networkidle' });
+                await page.waitForTimeout(2000);
+                if (i < codes.length - 1) i--; // retry same code after reload
                 continue;
             }
 
-            console.log(`Code applied: ${code}`);
-            await page.waitForTimeout(500);
+            console.log(`✅ Code applied successfully: ${code}`);
+            await page.waitForTimeout(800);
 
         } catch (error) {
-            console.log(`Error with code ${code}: ${error.message}`);
+            console.log(`Error applying code ${code}: ${error.message}`);
         }
     }
-    console.log('Done with promo codes.');
+    console.log('Promo codes processing finished.');
 }
 
 // ─────────────────────────────────────────
@@ -234,35 +208,30 @@ async function applyPromoCodes(page, codes) {
 // ─────────────────────────────────────────
 async function logoutUser(page, username) {
     console.log(`Logging out: ${username}`);
+
     try {
-        // Open profile dropdown via JS
         await page.evaluate(() => {
             const btn = document.querySelector('span.primary-button.button-profile');
             if (btn) btn.click();
         });
-        await page.waitForTimeout(800);
+        await page.waitForTimeout(1000);
 
-        // Try clicking sign out button multiple ways
         const signOutStrategies = [
-            () => page.locator('button.button-sign-out').click({ timeout: 3000 }),
-            () => page.evaluate(() => {
-                const btn = document.querySelector('button.button-sign-out');
-                if (btn) btn.click();
-            }),
-            () => page.getByRole('button', { name: /sign out/i }).click({ timeout: 3000 }),
-            () => page.locator('button').filter({ hasText: /sign out/i }).click({ timeout: 3000 }),
+            () => page.locator('button.button-sign-out').click({ timeout: 4000 }),
+            () => page.evaluate(() => document.querySelector('button.button-sign-out')?.click()),
+            () => page.getByRole('button', { name: /sign out/i }).click({ timeout: 4000 }),
+            () => page.locator('button').filter({ hasText: /sign out/i }).click({ timeout: 4000 }),
         ];
 
         for (const strategy of signOutStrategies) {
             try {
                 await strategy();
-                console.log('Sign out clicked');
+                console.log('Sign out clicked successfully');
                 break;
             } catch (e) {}
         }
 
         await page.waitForTimeout(1500);
-        console.log(`Logged out: ${username}`);
     } catch (e) {
         console.log(`Logout issue: ${e.message}`);
     }
@@ -274,6 +243,7 @@ async function logoutUser(page, username) {
 async function main() {
     const config = JSON.parse(fs.readFileSync('config.json', 'utf-8'));
     const credentials = JSON.parse(fs.readFileSync('credentials.json', 'utf-8'));
+
     const codes = config.code
         ? config.code.split(',').map(c => c.trim()).filter(Boolean)
         : [];
@@ -281,13 +251,18 @@ async function main() {
     const browser = await chromium.launch({
         headless: true,
         slowMo: 50,
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-            || '/usr/bin/google-chrome-stable'
-            || '/usr/bin/chromium-browser',
+        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+                        '/usr/bin/google-chrome-stable' ||
+                        '/usr/bin/chromium-browser',
     });
 
     for (const user of credentials) {
-        const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+        const context = await browser.newContext({
+            viewport: { width: 1280, height: 900 },
+            // Optional: make it look more human
+            // userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...'
+        });
+
         const page = await context.newPage();
 
         try {
@@ -296,18 +271,21 @@ async function main() {
             if (codes.length > 0) await applyPromoCodes(page, codes);
             await logoutUser(page, user.username);
         } catch (error) {
-            console.error(`Failed for ${user.username}: ${error.message}`);
-            await page.screenshot({ path: `debug_error_${user.username.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.png` });
+            console.error(`❌ Failed for ${user.username}: ${error.message}`);
+            await page.screenshot({ 
+                path: `debug_error_${user.username.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.png` 
+            }).catch(() => {});
         } finally {
             await context.close();
             console.log(`Context closed for ${user.username}\n`);
         }
 
-        await new Promise(r => setTimeout(r, 1500));
+        // Small delay between accounts
+        await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
     }
 
     await browser.close();
-    console.log('All users processed.');
+    console.log('🎉 All users processed successfully.');
 }
 
 main().catch(console.error);
