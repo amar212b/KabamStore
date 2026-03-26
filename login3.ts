@@ -54,11 +54,16 @@ async function loginUser(page, user) {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    // Accept cookies
-    try {
-        await page.locator('button.button-accept').click({ timeout: 3000 });
-        await page.waitForTimeout(1000);
-    } catch (e) {}
+    // Accept cookies — try both old and new site banners
+    const cookieStrategies = [
+        () => page.locator('button.button-accept').click({ timeout: 3000 }),
+        () => page.locator('button', { hasText: /^accept all$/i }).click({ timeout: 3000 }),
+        () => page.locator('button', { hasText: /^accept$/i }).click({ timeout: 3000 }),
+    ];
+    for (const fn of cookieStrategies) {
+        try { await fn(); await page.waitForTimeout(500); break; } catch (e) {}
+    }
+    await page.waitForTimeout(1000);
 
     // Detect which site version loaded
     const isNewSite = await page.evaluate(() => {
@@ -104,13 +109,13 @@ async function loginUser(page, user) {
         await page.waitForURL(/store\.playcontestofchampions\.com/i, { timeout: 30000 });
 
     } else {
-        // ── OLD SITE: LOG IN button → LOGIN WITH KABAM modal → popup ──
+        // ── OLD SITE: LOG IN → LOGIN WITH KABAM modal → popup ──
         console.log('Using old site login flow...');
 
         // Click LOG IN button top right
         const loginTriggers = [
             () => page.locator('a', { hasText: /^log in$/i }).first().click({ timeout: 4000 }),
-            () => page.getByRole('link', { name: /^log in$/i }).first().click({ timeout: 4000 }),
+            () => page.getByRole('link', { name: /log in/i }).first().click({ timeout: 4000 }),
             () => page.locator('text=LOG IN').first().click({ timeout: 4000 }),
             () => page.locator('[class*="login"]').first().click({ timeout: 4000 }),
         ];
@@ -119,54 +124,64 @@ async function loginUser(page, user) {
         }
         await page.waitForTimeout(2000);
 
-        // Click LOGIN WITH KABAM button in modal — opens popup
+        // Wait for LOGIN WITH KABAM button to appear
+        await page.locator('button:has-text("LOGIN WITH KABAM")').waitFor({ state: 'visible', timeout: 8000 });
+        console.log('LOGIN WITH KABAM button visible');
+
+        // Set up popup listener before clicking
         const popupPromise = page.context().waitForEvent('page');
 
-        const kabamTriggers = [
-            () => page.locator('button', { hasText: /login with kabam/i }).click({ timeout: 5000 }),
-            () => page.getByRole('button', { name: /login with kabam/i }).click({ timeout: 5000 }),
-            () => page.locator('text=LOGIN WITH KABAM').click({ timeout: 5000 }),
-            () => page.locator('[class*="kabam"]').first().click({ timeout: 5000 }),
-        ];
+        // Click LOGIN WITH KABAM — try multiple strategies
         let kabamClicked = false;
+        const kabamTriggers = [
+            () => page.locator('button:has-text("LOGIN WITH KABAM")').click({ timeout: 3000 }),
+            () => page.getByRole('button', { name: /login with kabam/i }).click({ timeout: 3000 }),
+            () => page.locator('text=LOGIN WITH KABAM').click({ timeout: 3000 }),
+            () => page.evaluate(() => {
+                const btns = Array.from(document.querySelectorAll('button'));
+                const btn = btns.find(b => /login with kabam/i.test(b.textContent));
+                if (btn) btn.click();
+            }),
+        ];
         for (const fn of kabamTriggers) {
             try { await fn(); kabamClicked = true; break; } catch (e) {}
         }
 
         if (!kabamClicked) {
-            await page.screenshot({ path: `debug_kabam_modal_${Date.now()}.png` });
+            await page.screenshot({ path: `debug_kabam_fail_${Date.now()}.png` });
             throw new Error('Could not click LOGIN WITH KABAM button');
         }
 
-        // Handle Kabam popup
-        let kabamPage;
+        // Handle Kabam — could be popup or same tab navigation
+        let kabamPage = page;
         try {
             kabamPage = await Promise.race([
                 popupPromise,
-                // If no popup, maybe it navigated in same tab
                 new Promise((_, reject) => setTimeout(() => reject(new Error('no popup')), 5000)),
             ]);
             console.log('Kabam popup opened');
             await kabamPage.waitForLoadState('domcontentloaded');
             await kabamPage.waitForTimeout(1500);
-
-            await kabamPage.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 15000 });
-            await kabamPage.getByPlaceholder('Email').fill(user.username);
-            await kabamPage.locator('input[name="password"], input[placeholder="Password"]').fill(user.password);
-            await kabamPage.getByRole('button', { name: /^login$/i }).click({ timeout: 5000 });
-            await kabamPage.waitForEvent('close', { timeout: 20000 });
-
         } catch (e) {
-            // No popup — may have navigated in same tab
-            console.log('No popup detected, checking same tab navigation...');
-            await page.waitForURL(/kabam|oauth|auth/i, { timeout: 10000 });
-            await page.waitForLoadState('domcontentloaded');
-            await page.waitForTimeout(1500);
+            console.log('No popup — checking same tab navigation...');
+            try {
+                await page.waitForURL(/kabam|oauth|auth/i, { timeout: 10000 });
+                kabamPage = page;
+            } catch (e2) {
+                console.log('No navigation detected either, trying form on current page...');
+                kabamPage = page;
+            }
+        }
 
-            await page.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 10000 });
-            await page.getByPlaceholder('Email').fill(user.username);
-            await page.locator('input[name="password"], input[placeholder="Password"]').fill(user.password);
-            await page.getByRole('button', { name: /^login$/i }).click({ timeout: 5000 });
+        // Fill Kabam login form
+        await kabamPage.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 15000 });
+        await kabamPage.getByPlaceholder('Email').fill(user.username);
+        await kabamPage.locator('input[name="password"], input[placeholder="Password"]').fill(user.password);
+        await kabamPage.getByRole('button', { name: /^login$/i }).click({ timeout: 5000 });
+
+        // If popup, wait for it to close; if same tab, wait for redirect
+        if (kabamPage !== page) {
+            await kabamPage.waitForEvent('close', { timeout: 20000 }).catch(() => {});
         }
 
         // Wait to be redirected back to store
