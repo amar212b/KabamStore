@@ -248,13 +248,14 @@ async function main() {
         ? config.code.split(',').map(c => c.trim()).filter(Boolean)
         : [];
 
-    const browser = await chromium.launch({
-        headless: true,
-        slowMo: 50,
-        executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-                        '/usr/bin/google-chrome-stable' ||
-                        '/usr/bin/chromium-browser',
-    });
+    // const browser = await chromium.launch({
+    //     headless: true,
+    //     slowMo: 50,
+    //     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
+    //                     '/usr/bin/google-chrome-stable' ||
+    //                     '/usr/bin/chromium-browser',
+    // });
+    const browser = await chromium.launch({ headless: true, slowMo: 100 });
 
     for (const user of credentials) {
         const context = await browser.newContext({
