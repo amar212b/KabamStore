@@ -131,7 +131,7 @@ async function loginUser(page, user) {
         // Set up popup listener before clicking
         const popupPromise = page.context().waitForEvent('page');
 
-        // Click LOGIN WITH KABAM — try multiple strategies
+        // Click LOGIN WITH KABAM
         let kabamClicked = false;
         const kabamTriggers = [
             () => page.locator('button:has-text("LOGIN WITH KABAM")').click({ timeout: 3000 }),
@@ -168,7 +168,7 @@ async function loginUser(page, user) {
                 await page.waitForURL(/kabam|oauth|auth/i, { timeout: 10000 });
                 kabamPage = page;
             } catch (e2) {
-                console.log('No navigation detected either, trying form on current page...');
+                console.log('No navigation detected, trying form on current page...');
                 kabamPage = page;
             }
         }
@@ -346,8 +346,9 @@ async function main() {
         headless: true,
         slowMo: 50,
         executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-            || '/usr/bin/google-chrome-stable'
-            || '/usr/bin/chromium-browser',
+            || (fs.existsSync('/usr/bin/google-chrome-stable')
+                ? '/usr/bin/google-chrome-stable'
+                : '/usr/bin/chromium-browser'),
     });
 
     for (const user of credentials) {
