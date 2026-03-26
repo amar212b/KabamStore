@@ -37,7 +37,7 @@ jobs:
           echo '${{ secrets.CONFIG_JSON }}' > config.json
 
       - name: Run store script
-        run: node login3.js
+        run: node login3.ts
 
       - name: Upload debug screenshots
         if: always()
