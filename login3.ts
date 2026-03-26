@@ -4,7 +4,7 @@ const fs = require('fs');
 const MAIN_URL = 'https://store.playcontestofchampions.com/';
 
 // ─────────────────────────────────────────
-// Close modal with multiple strategies
+// Close modal
 // ─────────────────────────────────────────
 async function closeModal(page) {
     const strategies = [
@@ -27,80 +27,83 @@ async function closeModal(page) {
 }
 
 // ─────────────────────────────────────────
-// LOGIN - Most reliable version
+// LOGIN - Fixed for GitHub Actions (March 2026 design)
 // ─────────────────────────────────────────
 async function loginUser(page, user) {
     console.log(`\n--- Logging in: ${user.username} ---`);
 
-    await page.goto(MAIN_URL, { waitUntil: 'networkidle' });
-    await page.waitForTimeout(2000);
+    await page.goto(MAIN_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(3000);
 
-    // Accept cookies if present
-    try {
-        await page.locator('button.button-accept').click({ timeout: 4000 });
-        await page.waitForTimeout(800);
-    } catch (e) {}
+    // === Strong Cookie Banner Handling ===
+    console.log('Trying to accept cookie banner...');
+    const cookieStrategies = [
+        () => page.getByRole('button', { name: /ACCEPT ALL/i }).click({ timeout: 6000, force: true }),
+        () => page.locator('button').filter({ hasText: /ACCEPT ALL/i }).first().click({ timeout: 6000, force: true }),
+        () => page.getByRole('button', { name: /accept|ok|agree/i }).first().click({ timeout: 5000, force: true }),
+        () => page.locator('button.button-accept').click({ timeout: 4000, force: true }),
+    ];
 
-    // Debug information (very useful when it breaks)
-    console.log('Current URL:', page.url());
-    console.log('Page title:', await page.title());
-
-    const spanInfo = await page.evaluate(() => {
-        const span = document.querySelector('span.primary-button.button-login');
-        return {
-            exists: !!span,
-            visible: span ? (span.offsetParent !== null) : false,
-            parentTag: span ? span.parentElement?.tagName : null,
-            parentHref: span ? span.closest('a')?.href : null,
-        };
-    });
-    console.log('Login span info:', JSON.stringify(spanInfo));
-
-    // Take screenshot before attempting login
-    await page.screenshot({ path: `debug_before_login_${Date.now()}.png` });
-
-    // Try to get direct Kabam login URL from the anchor wrapping the span
-    let loginURL = await page.evaluate(() => {
-        const span = document.querySelector('span.primary-button.button-login');
-        if (!span) return null;
-        let el = span;
-        while (el && el.tagName !== 'A') el = el.parentElement;
-        return el && el.href ? el.href : null;
-    });
-
-    if (loginURL) {
-        console.log(`Navigating directly to login URL: ${loginURL}`);
-        await page.goto(loginURL, { waitUntil: 'domcontentloaded' });
-    } else {
-        console.log('No direct login URL found. Falling back to JS click + navigation...');
-        await Promise.all([
-            page.waitForNavigation({ timeout: 20000 }).catch(() => {}),
-            page.evaluate(() => {
-                const span = document.querySelector('span.primary-button.button-login');
-                if (span) span.click();
-            })
-        ]);
+    let cookieAccepted = false;
+    for (const strategy of cookieStrategies) {
+        try {
+            await strategy();
+            console.log('✅ Cookie banner accepted');
+            cookieAccepted = true;
+            await page.waitForTimeout(1500);
+            break;
+        } catch (e) {}
     }
 
+    if (!cookieAccepted) {
+        console.log('⚠️ Could not click ACCEPT ALL, continuing anyway...');
+    }
+
+    // Debug after cookies
+    await page.screenshot({ path: `debug_after_cookies_${Date.now()}.png` });
+
+    // === Click green LOG IN button ===
+    console.log('Looking for LOG IN button...');
+    const logInButton = page.getByRole('button', { name: /LOG IN/i }).first();
+
+    if (await logInButton.count() === 0) {
+        console.log('❌ LOG IN button not found!');
+        await page.screenshot({ path: `debug_no_login_button_${Date.now()}.png` });
+        throw new Error('LOG IN button not found - possibly blocked by cookie banner');
+    }
+
+    console.log('✅ Found LOG IN button, clicking...');
+    await logInButton.click({ timeout: 10000, force: true });
+
+    await page.waitForTimeout(3000);
+
+    // Wait for Kabam auth page
+    await page.waitForURL(/kabam|oauth|auth|login|signin/i, { timeout: 25000 }).catch(() => {
+        console.log('Warning: Auth URL pattern not detected');
+    });
+
     await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
-    console.log('Kabam login page URL:', page.url());
-    await page.screenshot({ path: `debug_kabam_login_${Date.now()}.png` });
+    await page.screenshot({ path: `debug_auth_page_${Date.now()}.png` });
+    console.log('Auth page URL:', page.url());
 
-    // Fill credentials on Kabam page
-    await page.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 15000 });
+    // === Fill Kabam login form ===
+    console.log('Filling credentials...');
+
+    await page.getByPlaceholder('Email').waitFor({ state: 'visible', timeout: 30000 });
     await page.getByPlaceholder('Email').fill(user.username);
     await page.getByPlaceholder('Password').fill(user.password);
 
-    await page.getByRole('button', { name: /^login$/i }).click({ timeout: 8000 });
+    await page.getByRole('button', { name: /^login$|^sign in$/i }).click({ timeout: 10000 });
 
-    // Wait for redirect back to the store
-    await page.waitForURL(/store\.playcontestofchampions\.com/i, { timeout: 30000 });
+    // Wait for redirect back to store
+    console.log('Waiting for redirect back to store...');
+    await page.waitForURL(/store\.playcontestofchampions\.com/i, { timeout: 40000 });
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(2000);
 
-    console.log(`✅ Successfully logged in as ${user.username}`);
+    console.log(`✅ Successfully logged in: ${user.username}`);
 }
 
 // ─────────────────────────────────────────
@@ -129,7 +132,7 @@ async function claimFreeItems(page) {
             break;
         }
 
-        console.log(`Claiming item: "${ctaText.trim()}" [${attempts + 1}]`);
+        console.log(`Claiming: "${ctaText.trim()}" [${attempts + 1}]`);
 
         await btn.scrollIntoViewIfNeeded();
         await page.evaluate(el => el.click(), await btn.elementHandle());
@@ -149,7 +152,7 @@ async function claimFreeItems(page) {
         attempts++;
     }
 
-    console.log(`Free items processing completed — claimed ${attempts} item(s).`);
+    console.log(`Free items done — processed ${attempts} item(s).`);
 }
 
 // ─────────────────────────────────────────
@@ -162,7 +165,7 @@ async function applyPromoCodes(page, codes) {
 
     for (let i = 0; i < codes.length; i++) {
         const code = codes[i];
-        console.log(`→ Applying code: ${code}`);
+        console.log(`Applying: ${code}`);
 
         try {
             const codeInput = page.locator('input[placeholder="Enter your code"]');
@@ -172,10 +175,9 @@ async function applyPromoCodes(page, codes) {
             await page.getByText('Apply code').click();
             await page.waitForTimeout(1800);
 
-            // Check for error message
             const errorMessage = await page
                 .locator('span.promocodes-input__error.xds-text-minor[data-source="server"]')
-                .textContent({ timeout: 2500 })
+                .textContent({ timeout: 3000 })
                 .catch(() => null);
 
             if (errorMessage) {
@@ -184,23 +186,14 @@ async function applyPromoCodes(page, codes) {
                 continue;
             }
 
-            const closed = await closeModal(page);
-            if (!closed) {
-                console.log(`Failed to close modal after ${code} — reloading page`);
-                await page.reload({ waitUntil: 'networkidle' });
-                await page.waitForTimeout(2000);
-                if (i < codes.length - 1) i--; // retry same code after reload
-                continue;
-            }
-
-            console.log(`✅ Code applied successfully: ${code}`);
+            await closeModal(page);
+            console.log(`✅ Code applied: ${code}`);
             await page.waitForTimeout(800);
 
         } catch (error) {
-            console.log(`Error applying code ${code}: ${error.message}`);
+            console.log(`Error with code ${code}: ${error.message}`);
         }
     }
-    console.log('Promo codes processing finished.');
 }
 
 // ─────────────────────────────────────────
@@ -208,7 +201,6 @@ async function applyPromoCodes(page, codes) {
 // ─────────────────────────────────────────
 async function logoutUser(page, username) {
     console.log(`Logging out: ${username}`);
-
     try {
         await page.evaluate(() => {
             const btn = document.querySelector('span.primary-button.button-profile');
@@ -218,19 +210,16 @@ async function logoutUser(page, username) {
 
         const signOutStrategies = [
             () => page.locator('button.button-sign-out').click({ timeout: 4000 }),
-            () => page.evaluate(() => document.querySelector('button.button-sign-out')?.click()),
             () => page.getByRole('button', { name: /sign out/i }).click({ timeout: 4000 }),
-            () => page.locator('button').filter({ hasText: /sign out/i }).click({ timeout: 4000 }),
         ];
 
         for (const strategy of signOutStrategies) {
             try {
                 await strategy();
-                console.log('Sign out clicked successfully');
+                console.log('Sign out clicked');
                 break;
             } catch (e) {}
         }
-
         await page.waitForTimeout(1500);
     } catch (e) {
         console.log(`Logout issue: ${e.message}`);
@@ -248,20 +237,25 @@ async function main() {
         ? config.code.split(',').map(c => c.trim()).filter(Boolean)
         : [];
 
-    // const browser = await chromium.launch({
-    //     headless: true,
-    //     slowMo: 50,
-    //     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ||
-    //                     '/usr/bin/google-chrome-stable' ||
-    //                     '/usr/bin/chromium-browser',
-    // });
-    const browser = await chromium.launch({ headless: true, slowMo: 100 });
+    const browser = await chromium.launch({
+        headless: true,
+        slowMo: 100,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+        ]
+    });
 
     for (const user of credentials) {
         const context = await browser.newContext({
-            viewport: { width: 1280, height: 900 },
-            // Optional: make it look more human
-            // userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...'
+            viewport: { width: 1366, height: 768 },
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+            locale: 'en-US',
+            extraHTTPHeaders: {
+                'Accept-Language': 'en-US,en;q=0.9',
+            }
         });
 
         const page = await context.newPage();
@@ -281,12 +275,11 @@ async function main() {
             console.log(`Context closed for ${user.username}\n`);
         }
 
-        // Small delay between accounts
-        await new Promise(r => setTimeout(r, 2000 + Math.random() * 1500));
+        await new Promise(r => setTimeout(r, 2500));
     }
 
     await browser.close();
-    console.log('🎉 All users processed successfully.');
+    console.log('🎉 All users processed.');
 }
 
 main().catch(console.error);
